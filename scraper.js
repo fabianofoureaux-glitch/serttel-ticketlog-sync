@@ -1,26 +1,8 @@
 const admin = require('firebase-admin');
 const { chromium: pw } = require('playwright');
 
-const rawKey = process.env.FIREBASE_PRIVATE_KEY ?? '';
-console.log('[DEBUG] key length:', rawKey.length);
-console.log('[DEBUG] first 30 chars:', JSON.stringify(rawKey.slice(0, 30)));
-console.log('[DEBUG] last 30 chars:', JSON.stringify(rawKey.slice(-30)));
-console.log('[DEBUG] contains literal \\n:', rawKey.includes('\\n'));
-console.log('[DEBUG] contains real newline:', rawKey.includes('\n'));
-
-let parsedKey = rawKey.trim();
-if (parsedKey.startsWith('"') && parsedKey.endsWith('"')) parsedKey = parsedKey.slice(1, -1);
-parsedKey = parsedKey.replace(/\\n/g, '\n').replace(/\r/g, '');
-
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: parsedKey,
-    }),
-  });
-}
+const svcAccount = JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_B64, 'base64').toString('utf8'));
+admin.initializeApp({ credential: admin.credential.cert(svcAccount) });
 const db = admin.firestore();
 
 const TOKEN_ENDPOINT = 'https://sso.sa.edenred.io/connect/token';
