@@ -1,6 +1,13 @@
 const admin = require('firebase-admin');
 const { chromium: pw } = require('playwright');
 
+const rawKey = process.env.FIREBASE_PRIVATE_KEY ?? '';
+console.log('[DEBUG] key length:', rawKey.length);
+console.log('[DEBUG] first 30 chars:', JSON.stringify(rawKey.slice(0, 30)));
+console.log('[DEBUG] last 30 chars:', JSON.stringify(rawKey.slice(-30)));
+console.log('[DEBUG] contains literal \\n:', rawKey.includes('\\n'));
+console.log('[DEBUG] contains real newline:', rawKey.includes('\n'));
+
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
