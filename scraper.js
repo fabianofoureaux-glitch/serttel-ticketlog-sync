@@ -8,12 +8,16 @@ console.log('[DEBUG] last 30 chars:', JSON.stringify(rawKey.slice(-30)));
 console.log('[DEBUG] contains literal \\n:', rawKey.includes('\\n'));
 console.log('[DEBUG] contains real newline:', rawKey.includes('\n'));
 
+let parsedKey = rawKey.trim();
+if (parsedKey.startsWith('"') && parsedKey.endsWith('"')) parsedKey = parsedKey.slice(1, -1);
+parsedKey = parsedKey.replace(/\\n/g, '\n').replace(/\r/g, '');
+
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n').replace(/\r/g, '').trim(),
+      privateKey: parsedKey,
     }),
   });
 }
