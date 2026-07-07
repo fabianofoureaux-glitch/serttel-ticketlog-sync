@@ -12,23 +12,28 @@ const FORM_LINK = Buffer.from('GoodManagerSSL/Fuel/FuelRelResumidoConsumoForm.cf
 
 async function getTokens() {
   const ref = db.collection('ticketlog_auth').doc('sessao');
-  const snap = await ref.get();
-  const candidates = [];
-  if (snap.exists && snap.data().refreshToken) candidates.push(snap.data().refreshToken);
-  if (process.env.TICKETLOG_REFRESH_SEED) candidates.push(process.env.TICKETLOG_REFRESH_SEED);
-  if (!candidates.length) throw new Error('Sem refresh_token no Firestore nem TICKETLOG_REFRESH_SEED');
-  let lastErr = '';
-  for (const refreshToken of candidates) {
-    const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, scope: SCOPE });
-    const r = await fetch(TOKEN_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
-    if (r.ok) {
-      const t = await r.json();
-      await ref.set({ refreshToken: t.refresh_token, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-      return t;
+  let tok;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const candidates = [];
+    if (snap.exists && snap.data().refreshToken) candidates.push(snap.data().refreshToken);
+    if (process.env.TICKETLOG_REFRESH_SEED) candidates.push(process.env.TICKETLOG_REFRESH_SEED);
+    if (!candidates.length) throw new Error('Sem refresh_token no Firestore nem TICKETLOG_REFRESH_SEED');
+    let lastErr = '';
+    for (const refreshToken of candidates) {
+      const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: CLIENT_ID, scope: SCOPE });
+      const r = await fetch(TOKEN_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+      if (r.ok) {
+        tok = await r.json();
+        tx.set(ref, { refreshToken: tok.refresh_token, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        console.log('[TL] refreshToken salvo no Firestore (ticketlog_auth/sessao)');
+        return;
+      }
+      lastErr = r.status + ': ' + (await r.text()).slice(0, 120);
     }
-    lastErr = r.status + ': ' + (await r.text()).slice(0, 120);
-  }
-  throw new Error('Refresh falhou em todos os tokens. Ultimo: ' + lastErr);
+    throw new Error('Refresh falhou em todos os tokens. Ultimo: ' + lastErr);
+  });
+  return tok;
 }
 
 function buildPostBody() {
