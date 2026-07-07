@@ -78,7 +78,7 @@ async function main() {
       } catch (e) {}
     }, { a: tok.access_token, i: tok.id_token, r: tok.refresh_token });
     await page.goto('https://plataforma.ticketlog.com.br/home', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.goto('https://plataforma.ticketlog.com.br/legacy?link=' + FORM_LINK, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto('https://plataforma.ticketlog.com.br/legacy?link=' + FORM_LINK, { waitUntil: 'domcontentloaded', timeout: 60000 });
     const frame = page.frames().find((f) => f.url().includes('legacy-soulog'));
     console.log('[TL] frame url:', frame ? frame.url() : 'NOT FOUND | frames: ' + page.frames().map((f) => f.url()).join(', '));
     if (!frame) throw new Error('iframe legacy nao encontrado');
