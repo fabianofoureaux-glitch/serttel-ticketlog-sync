@@ -1,0 +1,34 @@
+name: Ticketlog — Sync saldos combustível
+
+on:
+  schedule:
+    # 09:00 UTC = 06:00 BRT (UTC-3), segunda e quinta
+    - cron: '0 9 * * 1,4'
+  workflow_dispatch: # permite rodar manualmente pelo GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright + system dependencies
+        run: npx playwright install chromium --with-deps
+
+      - name: Run scraper
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+          TICKETLOG_REFRESH_SEED: ${{ secrets.TICKETLOG_REFRESH_SEED }}
+        run: node scraper.js
