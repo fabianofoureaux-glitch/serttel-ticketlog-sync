@@ -107,13 +107,13 @@ async function extrairCards(page) {
         return r && r.textContent.trim().length > 0;
       }, card, { timeout: 8000 });
       const back = await card.evaluate(el => {
-        const rev = el.querySelector('.box-car p.reverso');
-        const after = n => (n && n.nextElementSibling ? n.nextElementSibling.textContent.trim() : '');
-        return {
-          endereco: rev ? rev.textContent.trim() : '',
-          data: after(el.querySelector('i.sprite-16.calendario2-b')),
-          hora: after(el.querySelector('i.sprite-16.relogio-b')),
-        };
+        const box = el.querySelector('.box-car');
+        const rev = box && box.querySelector('p.reverso');
+        // Data/hora por regex sobre o texto do verso — robusto, sem depender de ícone.
+        const texto = box ? box.textContent : '';
+        const data = (texto.match(/\d{2}\/\d{2}\/\d{4}/) || [''])[0];
+        const hora = (texto.match(/\d{2}:\d{2}:\d{2}/) || [''])[0];
+        return { endereco: rev ? rev.textContent.trim() : '', data, hora };
       });
       endereco = back.endereco || null;
       ultimaAtualizacao = [back.data, back.hora].filter(Boolean).join(' ').trim() || null;
@@ -146,6 +146,9 @@ async function main() {
     const ligados = cards.filter(c => c.estado === 'Ligado').length;
     const desligados = cards.filter(c => c.estado === 'Desligado').length;
     console.log(`${TAG} extraídos ${cards.length} cards | ligados=${ligados} desligados=${desligados} sem-estado=${cards.length - ligados - desligados}`);
+    const comAtu = cards.filter(c => c.ultimaAtualizacao).length;
+    const exAtu = cards.find(c => c.ultimaAtualizacao);
+    console.log(`${TAG} ultimaAtualizacao populada em ${comAtu}/${cards.length} | exemplo: ${exAtu ? exAtu.placaRaw + ' -> "' + exAtu.ultimaAtualizacao + '"' : 'nenhum'}`);
     if (!cards.length) throw new Error('scraping sem cards — abortando sem gravar');
 
     // Match por placa contra a coleção veiculos (todas as filiais).
