@@ -21,6 +21,33 @@ function normPlaca(s) {
   return String(s || '').trim().toUpperCase().replace(/[\s-]/g, '');
 }
 
+// ── Geocoding do endereço do rastreador (texto -> lat/lng) via Nominatim/OSM ──
+// O Getrak só expõe o endereço em texto; para o CET sugerir o veículo mais próximo
+// precisamos de coordenadas. Geocodificamos aqui (Actions tem rede, sem CORS) e
+// gravamos rastreadorLat/Lng no doc. Só refazemos quando o endereço muda
+// (rastreadorGeoBase != endereço atual), respeitando o limite de ~1 req/s do Nominatim.
+const NOMINATIM_UA = 'serttel-demandas-geocode/1.0 (fabianofoureaux@gmail.com)';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function nominatim(q) {
+  const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=br&q=' + encodeURIComponent(q);
+  const r = await fetch(url, { headers: { 'User-Agent': NOMINATIM_UA, 'Accept-Language': 'pt-BR' } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  return j.length ? { lat: parseFloat(j[0].lat), lng: parseFloat(j[0].lon) } : null;
+}
+
+// Escada: endereço completo -> sem o número da casa (ex.: "7474F" quebra o Nominatim,
+// mas rua+bairro+cidade resolve e cai no bairro certo). Retorna {lat,lng} ou null.
+async function geocode(endereco) {
+  let g = await nominatim(endereco);
+  if (g) return g;
+  await sleep(1100);
+  const semNum = endereco.split(',').map(s => s.trim()).filter(s => !/^\d+[A-Za-z]?$/.test(s)).join(', ');
+  if (semNum !== endereco) { g = await nominatim(semNum); if (g) return g; }
+  return null;
+}
+
 // Retry com backoff (mesma escada do sync-chamados-cet.js): 3 tentativas, 3s e 8s.
 async function withRetry(fn, label) {
   const delays = [3000, 8000];
@@ -142,6 +169,13 @@ async function main() {
     await abrirSumario(page);
     const cards = await extrairCards(page);
 
+    // DEBUG TEMPORÁRIO — investigar mismatch de placa (remover depois).
+    console.log(`${TAG} DEBUG placasRaw: ${JSON.stringify(cards.map(c => c.placaRaw))}`);
+    try {
+      const firstHtml = await page.$eval('li:has(span.outter)', el => el.outerHTML);
+      console.log(`${TAG} DEBUG card[0] outerHTML: ${firstHtml.replace(/\s+/g, ' ').slice(0, 1200)}`);
+    } catch (e) { console.log(`${TAG} DEBUG outerHTML falhou: ${e.message}`); }
+
     // Sanidade: contagem de estados (bater com o KPI "Comunicação dos veículos").
     const ligados = cards.filter(c => c.estado === 'Ligado').length;
     const desligados = cards.filter(c => c.estado === 'Desligado').length;
@@ -151,32 +185,62 @@ async function main() {
     console.log(`${TAG} ultimaAtualizacao populada em ${comAtu}/${cards.length} | exemplo: ${exAtu ? exAtu.placaRaw + ' -> "' + exAtu.ultimaAtualizacao + '"' : 'nenhum'}`);
     if (!cards.length) throw new Error('scraping sem cards — abortando sem gravar');
 
-    // Match por placa contra a coleção veiculos (todas as filiais).
+    // Match por placa contra a coleção veiculos (todas as filiais). Guarda também os
+    // dados atuais p/ decidir se precisa re-geocodificar (endereço mudou?).
     const vsnap = await db.collection('veiculos').get();
     const byPlaca = new Map();
     vsnap.forEach(d => {
       const p = normPlaca(d.data().placa);
       if (!p) return;
       if (!byPlaca.has(p)) byPlaca.set(p, []);
-      byPlaca.get(p).push(d.ref);
+      byPlaca.get(p).push({ ref: d.ref, data: d.data() });
     });
 
     const now = admin.firestore.Timestamp.now();
     const batch = db.batch();
-    let atualizados = 0, semPar = 0;
+    let atualizados = 0, semPar = 0, geocodificados = 0, geoFalhas = 0;
     for (const c of cards) {
-      const refs = byPlaca.get(c.placaNorm);
-      if (!refs) { semPar++; continue; }
+      const alvos = byPlaca.get(c.placaNorm);
+      if (!alvos) { semPar++; continue; }
       // Só grava o que capturou — nunca sobrescreve com vazio (merge preserva o resto).
       const upd = { rastreadorSyncEm: now };
       if (c.estado) upd.rastreadorEstado = c.estado;
       if (c.endereco) upd.rastreadorEndereco = c.endereco;
       if (c.ultimaAtualizacao) upd.rastreadorUltimaAtualizacao = c.ultimaAtualizacao;
-      refs.forEach(ref => batch.set(ref, upd, { merge: true }));
+
+      // Geocodifica só quando há endereço novo e ele difere do que já foi geocodificado
+      // (rastreadorGeoBase) OU ainda não há coordenada. Evita bater no Nominatim à toa.
+      if (c.endereco) {
+        const precisa = alvos.some(a =>
+          a.data.rastreadorGeoBase !== c.endereco ||
+          !Number.isFinite(Number(a.data.rastreadorLat)) ||
+          !Number.isFinite(Number(a.data.rastreadorLng)));
+        if (precisa) {
+          try {
+            const g = await geocode(c.endereco);
+            if (g) {
+              upd.rastreadorLat = g.lat;
+              upd.rastreadorLng = g.lng;
+              upd.rastreadorGeoBase = c.endereco;
+              upd.rastreadorGeoEm = now;
+              geocodificados++;
+            } else {
+              console.log(`${TAG} geocode sem resultado p/ ${c.placaRaw}: ${c.endereco}`);
+              geoFalhas++;
+            }
+          } catch (e) {
+            console.log(`${TAG} geocode erro p/ ${c.placaRaw}: ${e.message}`);
+            geoFalhas++;
+          }
+          await sleep(1100);   // respeita ~1 req/s do Nominatim
+        }
+      }
+
+      alvos.forEach(a => batch.set(a.ref, upd, { merge: true }));
       atualizados++;
     }
     await batch.commit();
-    console.log(`${TAG} OK — atualizados=${atualizados} placas-sem-par-em-veiculos=${semPar}`);
+    console.log(`${TAG} OK — atualizados=${atualizados} geocodificados=${geocodificados} geo-falhas=${geoFalhas} placas-sem-par-em-veiculos=${semPar}`);
   } finally {
     if (browser) await browser.close();
     await admin.app().delete();
