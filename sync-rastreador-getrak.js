@@ -21,6 +21,15 @@ function normPlaca(s) {
   return String(s || '').trim().toUpperCase().replace(/[\s-]/g, '');
 }
 
+// O card do Getrak passou a trazer no span.placa a PLACA + o código do dispositivo
+// em linhas separadas (ex.: "BDZ1D98\n140901015"). Extrai só o token que tem cara de
+// placa BR (antiga AAA0000 ou Mercosul AAA0A00); se nenhum casar, cai no 1º token.
+const PLACA_RE = /^[A-Z]{3}[0-9][0-9A-Z][0-9]{2}$/;
+function extrairPlaca(raw) {
+  const tokens = String(raw || '').split(/\s+/).map(t => t.trim().toUpperCase()).filter(Boolean);
+  return tokens.find(t => PLACA_RE.test(t)) || tokens[0] || '';
+}
+
 // ── Geocoding do endereço do rastreador (texto -> lat/lng) via Nominatim/OSM ──
 // O Getrak só expõe o endereço em texto; para o CET sugerir o veículo mais próximo
 // precisamos de coordenadas. Geocodificamos aqui (Actions tem rede, sem CORS) e
@@ -148,7 +157,7 @@ async function extrairCards(page) {
       console.log(`${TAG} verso não carregou p/ ${placaRaw}: ${e.message}`);
     }
 
-    out.push({ placaRaw, placaNorm: normPlaca(placaRaw), estado, endereco, ultimaAtualizacao });
+    out.push({ placaRaw, placaNorm: normPlaca(extrairPlaca(placaRaw)), estado, endereco, ultimaAtualizacao });
   }
   return out;
 }
@@ -168,13 +177,6 @@ async function main() {
     await login(page);
     await abrirSumario(page);
     const cards = await extrairCards(page);
-
-    // DEBUG TEMPORÁRIO — investigar mismatch de placa (remover depois).
-    console.log(`${TAG} DEBUG placasRaw: ${JSON.stringify(cards.map(c => c.placaRaw))}`);
-    try {
-      const firstHtml = await page.$eval('li:has(span.outter)', el => el.outerHTML);
-      console.log(`${TAG} DEBUG card[0] outerHTML: ${firstHtml.replace(/\s+/g, ' ').slice(0, 1200)}`);
-    } catch (e) { console.log(`${TAG} DEBUG outerHTML falhou: ${e.message}`); }
 
     // Sanidade: contagem de estados (bater com o KPI "Comunicação dos veículos").
     const ligados = cards.filter(c => c.estado === 'Ligado').length;
