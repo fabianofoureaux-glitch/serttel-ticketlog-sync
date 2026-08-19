@@ -2,13 +2,19 @@ name: Getrak — Sync rastreador frota
 
 on:
   schedule:
-    - cron: '0 * * * *' # de hora em hora (UTC; sync é idempotente, fuso não importa)
+    - cron: '*/20 * * * *' # a cada 20 min (UTC; sync é idempotente, fuso não importa)
   workflow_dispatch: # permite rodar manualmente pelo GitHub UI
+
+# Um sync por vez: se o app do Getrak travar e o run anterior ainda estiver rodando,
+# cancela o antigo em vez de empilhar (o scrape é idempotente, sempre pega o estado atual).
+concurrency:
+  group: getrak-rastreador
+  cancel-in-progress: true
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
 
     steps:
       - uses: actions/checkout@v4
