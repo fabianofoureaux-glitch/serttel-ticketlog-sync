@@ -1,0 +1,32 @@
+name: Keepalive — mantém o cron ativo
+
+# Repos públicos têm os workflows AGENDADOS desativados pelo GitHub após 60 dias
+# sem atividade (commits). Foi o que congelou o GPS em 18/10/2026 (getrak-rastreador
+# ficou 'disabled_inactivity'). Este job faz um commit vazio 2x/mês só para registrar
+# atividade e resetar o contador de 60 dias — assim o sync do Getrak nunca mais desliga.
+
+on:
+  schedule:
+    - cron: '7 5 1,15 * *' # dia 1 e 15 de cada mês, 05:07 UTC (folga enorme vs. 60 dias)
+  workflow_dispatch: # permite rodar manualmente pelo GitHub UI
+
+permissions:
+  contents: write
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Commit vazio p/ registrar atividade
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit --allow-empty -m "chore: keepalive $(date -u +%Y-%m-%d) — mantém o cron agendado ativo"
+          git push
