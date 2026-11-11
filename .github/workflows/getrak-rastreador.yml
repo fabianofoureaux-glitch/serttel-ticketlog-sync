@@ -1,10 +1,16 @@
 name: Getrak — Sync rastreador frota
 
 on:
-  # Disparo a cada 20 min vem de cron externo (cron-job.org) via API workflow_dispatch —
-  # mais confiável que o schedule do GitHub. O schedule interno foi removido porque atrasava
-  # e colidia com o dispatch externo no mesmo concurrency group (cancel-in-progress),
-  # gerando runs "startup_failure" (e-mails de falha) sem parar o sync real.
+  # Disparo primário a cada 20 min vem de cron externo (cron-job.org) via API
+  # workflow_dispatch — mais confiável que o schedule do GitHub. O schedule interno
+  # */20 foi removido porque atrasava e colidia com o dispatch externo no mesmo
+  # concurrency group (cancel-in-progress), gerando runs "startup_failure" sem parar
+  # o sync real. Mantido abaixo só como REDE DE SEGURANÇA 1x/hora (se o cron externo
+  # cair). Minuto :30 fica no meio do intervalo do cron externo (:00/:20/:40) p/
+  # minimizar colisão; se colidir mesmo assim, o pior caso é um run cancelado (sync
+  # é idempotente).
+  schedule:
+    - cron: '30 * * * *' # fallback: 1x por hora
   workflow_dispatch: # cron externo + execução manual pelo GitHub UI
 
 # Um sync por vez: se o app do Getrak travar e o run anterior ainda estiver rodando,
